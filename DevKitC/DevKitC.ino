@@ -11,6 +11,7 @@ const char* MQTT_BROKER = "b127666df1f5484f8d4b824052b92e6f.s1.eu.hivemq.cloud";
 const int   MQTT_PORT   = 8883;
 const char* MQTT_USER   = "ENGF0001";
 const char* MQTT_TOPIC  = "project/counter";
+const uint8_t MQTT_QOS = 1;
 
 WiFiClientSecure wifiClient;
 PubSubClient mqttClient(wifiClient);
@@ -47,6 +48,7 @@ void connectWiFiEduroam() {
     Serial.println(WiFi.localIP());
   } else {
     Serial.println("\nFailed to connect to Eduroam!");
+    delay(5000);
   }
 }
 
@@ -87,7 +89,7 @@ void publishTelemetry() {
     char msg[20];
     snprintf(msg, sizeof(msg), "{\"counter\": %d}", counter);
 
-    if (mqttClient.publish(MQTT_TOPIC, msg)) {
+    if (mqttClient.publish(MQTT_TOPIC, msg, false, MQTT_QOS)) {
       Serial.print("Published: ");
       Serial.println(msg);
     } else {
@@ -99,9 +101,22 @@ void publishTelemetry() {
 }
 
 void loop() {
-  if (!mqttClient.connected()) connectMQTT();
-  mqttClient.loop();
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Wi-Fi disconnected. Reconnecting...");
+    connectWiFiEduroam();
+    if (WiFi.status() == WL_CONNECTED) {
+      connectMQTT();
+    }
+  }
 
-  updateCounter();
-  publishTelemetry();
+  if (!mqttClient.connected()) {
+    Serial.println("MQTT disconnected. Reconnecting...");
+    connectMQTT();
+  }
+  
+  if (mqttClient.connected()) {
+    mqttClient.loop();
+    updateCounter();
+    publishTelemetry();
+  }
 }
