@@ -11,21 +11,22 @@ const char* MQTT_BROKER = "b127666df1f5484f8d4b824052b92e6f.s1.eu.hivemq.cloud";
 const int   MQTT_PORT   = 8883;
 const char* MQTT_USER   = "ENGF0001";
 const char* MQTT_TOPIC  = "project/counter";
-const uint8_t MQTT_QOS = 1;
 
-WiFiClientSecure wifiClient;
-PubSubClient mqttClient(wifiClient);
-unsigned long lastPublish = 0;
+WiFiClientSecure wifi_client;
+unsigned long last_wifi_connection_attempt = 0;
+const int WIFI_CONNECTION_DELAY = 10000;
+bool detected_wifi_connection = false;
+
+PubSubClient mqttClient(wifi_client);
+unsigned long last_mqtt_connection_attempt = 0;
+const int MQTT_CONNECTION_DELAY = 5000;
+unsigned long last_publish = 0;
 
 int counter = 0;
-unsigned long lastCounterUpdate = 0;
+unsigned long last_counter_update = 0;
 
-/* notes
-handle wifi (and mqtt?) disconnecting midway through
-*/
-
-void connectWiFiEduroam() {
-  Serial.println("Connecting to Eduroam...");
+void setConnectionDetails() {
+  wifi_client.setCACert(root_ca);
 
   WiFi.mode(WIFI_STA);
   esp_eap_client_set_identity((uint8_t*)SECRET_WIFI_USER, strlen(SECRET_WIFI_USER));
@@ -33,36 +34,28 @@ void connectWiFiEduroam() {
   esp_eap_client_set_password((uint8_t*)SECRET_WIFI_PASS, strlen(SECRET_WIFI_PASS));
   esp_wifi_sta_enterprise_enable();
 
-  WiFi.begin(WIFI_SSID);
+  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+}
 
-  int tries = 0;
-  while (WiFi.status() != WL_CONNECTED && tries < 40) {
-    delay(500);
-    Serial.print(".");
-    tries++;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi connected!");
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("\nFailed to connect to Eduroam!");
-    delay(5000);
+void attemptWiFiConnection() {
+  if (millis() - last_wifi_connection_attempt >= WIFI_CONNECTION_DELAY) {
+    last_wifi_connection_attempt = millis();
+    Serial.printf("Connecting to WiFi (%s)...\n", WIFI_SSID);
+    WiFi.begin(WIFI_SSID);
   }
 }
 
-void connectMQTT() {
-  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
-  while (!mqttClient.connected()) {
-    Serial.print("Connecting to HiveMQ...");
+void attemptMQTTConnection() {
+  if (millis() - last_mqtt_connection_attempt >= MQTT_CONNECTION_DELAY) {
+    last_mqtt_connection_attempt = millis();
+    Serial.println("Connecting to HiveMQ...");
     if (mqttClient.connect("ESP32Client", MQTT_USER, SECRET_MQTT_PASS)) {
-      Serial.println("Connected!");
+      Serial.println("Connected to HiveMQ");
+      // subscribe to a command topic here
     } else {
       Serial.print("Failed, rc=");
       Serial.print(mqttClient.state());
       Serial.println(" retrying in 5 seconds");
-      delay(5000);
     }
   }
 }
@@ -71,52 +64,64 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  wifiClient.setCACert(root_ca);
-  connectWiFiEduroam();
-  connectMQTT();
+  setConnectionDetails();
+  
+  attemptWiFiConnection();
+  attemptMQTTConnection();
+}
+
+bool maintainConnection() {
+  if (WiFi.status() != WL_CONNECTED) {
+    if (detected_wifi_connection) {
+      Serial.println("WiFi disconnected");
+      detected_wifi_connection = false;
+    }
+    attemptWiFiConnection();
+    return false;
+  }
+  if (!detected_wifi_connection) {
+    Serial.printf("Connected to WiFi (%s)\n", WIFI_SSID);
+    detected_wifi_connection = true;
+  }
+
+  if (!mqttClient.connected()) {
+    attemptMQTTConnection();
+    return false;
+  }
+
+  return true;
 }
 
 void updateCounter() {
-  if (millis() - lastCounterUpdate >= 2000) {
+  if (millis() - last_counter_update >= 2000) {
     counter++;
-    lastCounterUpdate = millis();
+    last_counter_update = millis();
   }
 }
 
 void publishTelemetry() {
-  if (millis() - lastPublish >= 1000) {
+  if (millis() - last_publish >= 1000) {
 
-    char msg[20];
+    char msg[50];
     snprintf(msg, sizeof(msg), "{\"counter\": %d}", counter);
 
-    if (mqttClient.publish(MQTT_TOPIC, msg, false, MQTT_QOS)) {
+    if (mqttClient.publish(MQTT_TOPIC, msg)) {
       Serial.print("Published: ");
       Serial.println(msg);
     } else {
       Serial.println("Publish failed!");
     }
 
-    lastPublish = millis();
+    last_publish = millis();
   }
 }
 
 void loop() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Wi-Fi disconnected. Reconnecting...");
-    connectWiFiEduroam();
-    if (WiFi.status() == WL_CONNECTED) {
-      connectMQTT();
-    }
-  }
 
-  if (!mqttClient.connected()) {
-    Serial.println("MQTT disconnected. Reconnecting...");
-    connectMQTT();
-  }
-  
-  if (mqttClient.connected()) {
+  updateCounter();
+
+  if (maintainConnection()) {
     mqttClient.loop();
-    updateCounter();
     publishTelemetry();
   }
 }
