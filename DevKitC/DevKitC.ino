@@ -10,7 +10,7 @@ const char* WIFI_SSID = "eduroam";
 const char* MQTT_BROKER = "b127666df1f5484f8d4b824052b92e6f.s1.eu.hivemq.cloud";
 const int   MQTT_PORT   = 8883;
 const char* MQTT_USER   = "ENGF0001";
-const char* MQTT_TOPIC  = "project/counter";
+const char* MQTT_TOPIC  = "project/telemetry";
 
 WiFiClientSecure wifi_client;
 unsigned long last_wifi_connection_attempt = 0;
@@ -22,8 +22,10 @@ unsigned long last_mqtt_connection_attempt = 0;
 const int MQTT_CONNECTION_DELAY = 5000;
 unsigned long last_publish = 0;
 
-int counter = 0;
-unsigned long last_counter_update = 0;
+float ph = 5.0;
+float temperature = 30.0;
+int rpm = 1000;
+unsigned long last_sensor_update = 0;
 
 void setConnectionDetails() {
   wifi_client.setCACert(root_ca);
@@ -51,7 +53,7 @@ void attemptMQTTConnection() {
     Serial.println("Connecting to HiveMQ...");
     if (mqttClient.connect("ESP32Client", MQTT_USER, SECRET_MQTT_PASS)) {
       Serial.println("Connected to HiveMQ");
-      // subscribe to a command topic here
+      // TODO: subscribe to a command topic here
     } else {
       Serial.print("Failed, rc=");
       Serial.print(mqttClient.state());
@@ -63,6 +65,8 @@ void attemptMQTTConnection() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
+
+  randomSeed(esp_random()); // temporary, see readSensorData()
 
   setConnectionDetails();
   
@@ -92,18 +96,25 @@ bool maintainConnection() {
   return true;
 }
 
-void updateCounter() {
-  if (millis() - last_counter_update >= 2000) {
-    counter++;
-    last_counter_update = millis();
+void readSensorData() { // temporarily generate random values
+  if (millis() - last_sensor_update >= 1000) {
+    last_sensor_update = millis();
+    ph += random(-20, 21) / 100.0;
+    ph = min(max(ph, 3.0f), 7.0f);
+    temperature += random(-5, 6) / 10.0;
+    temperature = min(max(temperature, 25.0f), 35.0f);
+    rpm += random(-10, 11);
+    rpm = min(max(rpm, 500), 1500);
   }
 }
 
 void publishTelemetry() {
   if (millis() - last_publish >= 1000) {
 
-    char msg[50];
-    snprintf(msg, sizeof(msg), "{\"counter\": %d}", counter);
+    char msg[128];
+    snprintf(msg, sizeof(msg), 
+             "{\"ph\": %.2f, \"temperature\": %.1f, \"rpm\": %d}", 
+             ph, temperature, rpm);
 
     if (mqttClient.publish(MQTT_TOPIC, msg)) {
       Serial.print("Published: ");
@@ -118,7 +129,7 @@ void publishTelemetry() {
 
 void loop() {
 
-  updateCounter();
+  readSensorData();
 
   if (maintainConnection()) {
     mqttClient.loop();
