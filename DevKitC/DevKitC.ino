@@ -10,7 +10,8 @@ const char* WIFI_SSID = "eduroam";
 const char* MQTT_BROKER = "b127666df1f5484f8d4b824052b92e6f.s1.eu.hivemq.cloud";
 const int   MQTT_PORT   = 8883;
 const char* MQTT_USER   = "ENGF0001";
-const char* MQTT_TOPIC  = "project/telemetry";
+const char* MQTT_TOPIC_TELEMETRY  = "project/telemetry";
+const char* MQTT_TOPIC_SETPOINTS = "project/setpoints";
 
 WiFiClientSecure wifi_client;
 unsigned long last_wifi_connection_attempt = 0;
@@ -37,6 +38,7 @@ void setConnectionDetails() {
   esp_wifi_sta_enterprise_enable();
 
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  mqttClient.setCallback(mqttCallback);
 }
 
 void attemptWiFiConnection() {
@@ -53,7 +55,8 @@ void attemptMQTTConnection() {
     Serial.println("Connecting to HiveMQ...");
     if (mqttClient.connect("ESP32Client", MQTT_USER, SECRET_MQTT_PASS)) {
       Serial.println("Connected to HiveMQ");
-      // TODO: subscribe to a command topic here
+      mqttClient.subscribe(MQTT_TOPIC_SETPOINTS);
+      Serial.println("Subscribed to project/setpoints");
     } else {
       Serial.print("Failed, rc=");
       Serial.print(mqttClient.state());
@@ -72,6 +75,17 @@ void setup() {
   
   attemptWiFiConnection();
   attemptMQTTConnection();
+}
+
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message arrived on [");
+  Serial.print(topic);
+  Serial.print("]: ");
+  
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
 }
 
 bool maintainConnection() {
@@ -116,7 +130,7 @@ void publishTelemetry() {
              "{\"ph\": %.2f, \"temperature\": %.1f, \"rpm\": %d}", 
              ph, temperature, rpm);
 
-    if (mqttClient.publish(MQTT_TOPIC, msg)) {
+    if (mqttClient.publish(MQTT_TOPIC_TELEMETRY, msg)) {
       Serial.print("Published: ");
       Serial.println(msg);
     } else {
