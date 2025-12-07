@@ -100,20 +100,9 @@ bool maintainConnection() {
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   
-  Serial.println("Received setpoints: ");
-  StaticJsonDocument<200> doc;
-
-  DeserializationError error = deserializeJson(doc, payload, length);
-  if (error) {
-    Serial.print("deserializeJson() failed: ");
-    Serial.println(error.f_str());
-    return;
-  }
-
-  serializeJson(doc, Serial2);
+  Serial2.write(payload, length);
   Serial2.println();
-
-  Serial.println("Received control message and forwarded it to Nano");
+  Serial.println("Received control JSON message and forwarded it to Nano");
 }
 
 void readNanoData() {
