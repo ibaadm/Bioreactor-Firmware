@@ -2,16 +2,21 @@
 #include <WiFiClientSecure.h>
 #include <esp_eap_client.h>
 #include <PubSubClient.h>
+#include <ArduinoJson.h>
+#include <HardwareSerial.h>
 #include "cert.h"
 #include "secrets.h"
+
+const int RX_PIN = 32;
+const int TX_PIN = 33;
 
 const char* WIFI_SSID = "eduroam";
 
 const char* MQTT_BROKER = "b127666df1f5484f8d4b824052b92e6f.s1.eu.hivemq.cloud";
 const int   MQTT_PORT   = 8883;
 const char* MQTT_USER   = "ENGF0001";
-const char* MQTT_TOPIC_TELEMETRY  = "project/telemetry";
-const char* MQTT_TOPIC_SETPOINTS = "project/setpoints";
+const char* MQTT_TOPIC_TELEMETRY  = "bioreactor/telemetry";
+const char* MQTT_TOPIC_CONTROL = "bioreactor/control/#";
 
 WiFiClientSecure wifi_client;
 unsigned long last_wifi_connection_attempt = 0;
@@ -22,11 +27,6 @@ PubSubClient mqttClient(wifi_client);
 unsigned long last_mqtt_connection_attempt = 0;
 const int MQTT_CONNECTION_DELAY = 5000;
 unsigned long last_publish = 0;
-
-float ph = 5.0;
-float temperature = 30.0;
-int rpm = 1000;
-unsigned long last_sensor_update = 0;
 
 void setConnectionDetails() {
   wifi_client.setCACert(root_ca);
@@ -55,7 +55,7 @@ void attemptMQTTConnection() {
     Serial.println("Connecting to HiveMQ...");
     if (mqttClient.connect("ESP32Client", MQTT_USER, SECRET_MQTT_PASS)) {
       Serial.println("Connected to HiveMQ");
-      mqttClient.subscribe(MQTT_TOPIC_SETPOINTS);
+      mqttClient.subscribe(MQTT_TOPIC_CONTROL);
       Serial.println("Subscribed to project/setpoints");
     } else {
       Serial.print("Failed, rc=");
@@ -67,9 +67,8 @@ void attemptMQTTConnection() {
 
 void setup() {
   Serial.begin(115200);
+  Serial2.begin(115200, SERIAL_8N1, RX_PIN, TX_PIN);
   delay(1000);
-
-  randomSeed(esp_random()); // temporary, see readSensorData()
 
   setConnectionDetails();
   
@@ -100,53 +99,61 @@ bool maintainConnection() {
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message arrived on [");
-  Serial.print(topic);
-  Serial.print("]: ");
   
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
+  Serial.println("Received setpoints: ");
+  StaticJsonDocument<200> doc;
+
+  DeserializationError error = deserializeJson(doc, payload, length);
+  if (error) {
+    Serial.print("deserializeJson() failed: ");
+    Serial.println(error.f_str());
+    return;
   }
-  Serial.println();
+
+  serializeJson(doc, Serial2);
+  Serial2.println();
+
+  Serial.println("Received control message and forwarded it to Nano");
 }
 
-void readSensorData() { // temporarily generate random values
-  if (millis() - last_sensor_update >= 1000) {
-    last_sensor_update = millis();
-    ph += random(-20, 21) / 100.0;
-    ph = min(max(ph, 3.0f), 7.0f);
-    temperature += random(-5, 6) / 10.0;
-    temperature = min(max(temperature, 25.0f), 35.0f);
-    rpm += random(-10, 11);
-    rpm = min(max(rpm, 500), 1500);
-  }
-}
+void readNanoData() {
+  if (Serial2.available() > 0) {
+    Serial.println("Success");
+    String incomingJson = Serial2.readStringUntil('\n');
 
-void publishTelemetry() {
-  if (millis() - last_publish >= 1000) {
+    StaticJsonDocument<200> doc;
+    DeserializationError error = deserializeJson(doc, incomingJson);
 
-    char msg[128];
-    snprintf(msg, sizeof(msg), 
-             "{\"ph\": %.2f, \"temperature\": %.1f, \"rpm\": %d}", 
-             ph, temperature, rpm);
-
-    if (mqttClient.publish(MQTT_TOPIC_TELEMETRY, msg)) {
-      Serial.print("Published: ");
-      Serial.println(msg);
-    } else {
-      Serial.println("Publish failed!");
+    if (error) {
+      Serial.print(F("Nano Data Error: "));
+      Serial.println(error.f_str());
+      return;
     }
 
-    last_publish = millis();
+    publishTelemetry(doc["ph"], doc["temperature"], doc["rpm"]);
+  }
+}
+
+void publishTelemetry(ph, temperature, rpm) {
+
+  char msg[128];
+  snprintf(msg, sizeof(msg), 
+            "{\"ph\": %.2f, \"temperature\": %.1f, \"rpm\": %d}", 
+            ph, temperature, rpm);
+
+  if (mqttClient.publish(MQTT_TOPIC_TELEMETRY, msg)) {
+    Serial.print("Published: ");
+    Serial.println(msg);
+  } else {
+    Serial.println("Publish failed!");
   }
 }
 
 void loop() {
 
-  readSensorData();
+  readNanoData();
 
   if (maintainConnection()) {
     mqttClient.loop();
-    publishTelemetry();
   }
 }
