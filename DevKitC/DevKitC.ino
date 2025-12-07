@@ -123,7 +123,7 @@ void readNanoData() {
   }
 }
 
-void publishTelemetry(ph, temperature, rpm) {
+void publishTelemetry(double ph, double temperature, double rpm) {
 
   char msg[128];
   snprintf(msg, sizeof(msg), 
