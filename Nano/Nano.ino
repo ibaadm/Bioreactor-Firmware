@@ -9,9 +9,9 @@
  /*==========================================================MOTOR VARIABLES=================================================*/
   double RPM=0;
   double prev_RPM=0; /* previous RPM for smoothing*/
-  double* current_RPMs;
-  int RPM_index;
-  double RPM_mean;
+  double* current_RPMs = new double[10];
+  int RPM_index = 0;
+  double RPM_mean = NAN;
   int pulse_count;
   unsigned long motor_time; /* time measuremetns for motor calculation*/
   unsigned long motor_prev_time = 0;
@@ -27,7 +27,6 @@
   float motor_prop;
   float motor_prop_coeff=1;
  
-
   float motor_integ = 0;
   float motor_integ_coeff = 0.001;
 
@@ -47,9 +46,9 @@
   float b = 4220; /*beta constant*/
   float T0 = 25; /* base temperature for thermistor equation*/
   double temperature;
-  double* current_temperatures;
-  int temperature_index;
-  double temperature_mean;
+  double* current_temperatures = new double[10];
+  int temperature_index = 0;
+  double temperature_mean = NAN;
   float Vin_max = 3.3;
 
   float Vout;
@@ -58,8 +57,6 @@
   unsigned long heat_time = 0;/* In milliseconds*/
   unsigned long heat_time_prev = 0;
   int heat_interval = 100;
-
-
  
   /* PWN VALUES*/
   int heat_state_pwm =0;
@@ -74,12 +71,7 @@
   float heat_transfer = Vin_max/heat_resolution;
   int heat_output = 0;
 
-
-
  /*==========================================PH VARIABLES================================================================*/
-
-
-
 const float KpH=5/4095; // 12 bit resolution for ESP 32 hense 4095( from 2^12 -1 ) the calibration values are 2.1046, 1.6755
 //Also need to put in pH7 and adjust trimmer potentionmeter so when is pH7 gives about 5/2V
 //KpH var is what convert ADC reading to pH voltage
@@ -90,19 +82,14 @@ float pH, pHSmoothed, AimpH=7.0, DeltapH=0.1, Bs; //pH gives the raw pH recorded
 bool AcidOn=0, BaseOn=0;//variables to keep track of if pump is on or not
 unsigned long pH_time =0;
 unsigned long pH_time_prev = 0;
-int pH_invertal = 10; /* interval in milliaseconds*/
+int pH_invertal = 100; /* interval in milliaseconds*/
+
+
 
 void setup() {
   Serial.begin(115200);
   Serial1.begin(115200, SERIAL_8N1, D0, D1);
   delay(1000);
-
-  current_RPMs = new double[10];
-  RPM_index = 0;
-  RPM_mean = NAN;
-  current_temperatures = new double[10];
-  temperature_index = 0;
-  temperature_mean = NAN;
 
   /*===========================Motor setup=======================================*/
   pinMode(Motor_input_pin, INPUT);
