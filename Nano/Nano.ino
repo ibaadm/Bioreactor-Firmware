@@ -219,6 +219,7 @@ void sendReadingsToDevKitC() {
 }
 
 void loop() {
+
   /*Ive replaced the old counter i used to use for pwn by just checking how long its been since the last pulse*/
   /*=========================================MOTOR PWM================================================*/
   motor_pwm_time = micros();
@@ -261,62 +262,72 @@ void loop() {
   }
 
   /*=======================MOTOR CALCULATING=======================================*/
-  motor_time = micros();
-  /*Determining output*/
-  if (motor_time - motor_prev_time >= motor_interval) {
-    noInterrupts(); /* turns off interrupt routine while taking the amount of pulses counted*/
-    double pulses = pulse_count;
-    pulse_count = 0;
-    interrupts();
-    /*calculating RPM*/
-    revs = pulses / 70;
-    revs_per_sec = (revs / (motor_time - motor_prev_time)) * 1000000;
-    RPM = revs_per_sec * 60;
-    RPM = (RPM * 0.6) + (prev_RPM * 0.4); /* smoothes out the RPM reading quite heavily because without it the readings are even more unstable*/
-    motor_error = motor_setpoint - RPM;
-    motor_prop = motor_error * motor_prop_coeff; /*proportional part*/
-
-    motor_integ += motor_integ_coeff * (0.5) * ((motor_time - motor_prev_time) / 1000) * (motor_error); /* trapezium rule for integral part*/
-
-
-    prev_motor_error = motor_error;
-
-    motor_output = motor_prop + motor_integ;
-    //Serial.println(motor_output);
-    motor_output = constrain(motor_output, -1000, 1000);
-    motor_output = map(motor_output, -1000, 1000, 0, 1000);
-    /*converts output to a percentage, -500 and 500 are arbitrary and can be changed during testin, 1000 because the pwn uses unsigned long which are whole numbers*/
-    //Serial.println(motor_prop);
-    //Serial.print("RPM: ");    Serial.print(RPM, 1);
-    calculateRPMMean(RPM);
-    //Serial.print("  Error: "); Serial.print(motor_error, 1);
-    //Serial.print("  PWM: ");  Serial.print(motor_output);
-    //Serial.println("%");
-    prev_RPM = RPM;
-    motor_prev_time = motor_time;
+  if (motor_killed) {
+    motor_output = 0.0;
   }
-  /*================================HEATING CALCULATION==============================*/
+  else {
+    /*Determining output*/
+    if (motor_time - motor_prev_time >= motor_interval) {
+      noInterrupts(); /* turns off interrupt routine while taking the amount of pulses counted*/
+      double pulses = pulse_count;
+      pulse_count = 0;
+      interrupts();
+      /*calculating RPM*/
+      revs = pulses / 70;
+      revs_per_sec = (revs / (motor_time - motor_prev_time)) * 1000000;
+      RPM = revs_per_sec * 60;
+      RPM = (RPM * 0.6) + (prev_RPM * 0.4); /* smoothes out the RPM reading quite heavily because without it the readings are even more unstable*/
+      motor_error = motor_setpoint - RPM;
+      motor_prop = motor_error * motor_prop_coeff; /*proportional part*/
 
-  /* calcuates temperature and the response to setpoint*/
-  heat_time = millis();
-  if (heat_time - heat_time_prev >= heat_interval) {
-    Vout = (analogRead(heatInputPin) * heat_transfer); /* Measures the potential after the pd drop across the resistor in series with thermistor/
-    /* max voltage is 3.3V, thre pin returns 4096 possible inputs*/
+      motor_integ += motor_integ_coeff * (0.5) * ((motor_time - motor_prev_time) / 1000) * (motor_error); /* trapezium rule for integral part*/
 
-    RT = (R2 * (Vout / Vin_max)) / (1.0 - Vout / Vin_max);                               /* Calculates the resitance of the thermistor using potential divider*/
-    temperature = (b * (T0 + 273.0)) / ((T0 + 273.0) * log((RT / RT_base)) + b) - 273.0; /* uses thermistor's resistance to calculate tenperature*/
-                                                                                         /*Bang Bang control*/
-    if (temperature <= (heat_set_point - heat_deadband)) {                               /* heat deaband is zero, but keeping it here just in case we miraculously have time to fiddle with heating again*/
-      heat_output = 60;
-    } else {
-      heat_output = -1; /* making the duty cycle negative somehow makes the code a lot simpler*/
+
+      prev_motor_error = motor_error;
+
+      motor_output = motor_prop + motor_integ;
+      //Serial.println(motor_output);
+      motor_output = constrain(motor_output, -1000, 1000);
+      motor_output = map(motor_output, -1000, 1000, 0, 1000);
+      /*converts output to a percentage, -500 and 500 are arbitrary and can be changed during testin, 1000 because the pwn uses unsigned long which are whole numbers*/
+      //Serial.println(motor_prop);
+      //Serial.print("RPM: ");    Serial.print(RPM, 1);
+      calculateRPMMean(RPM);
+      //Serial.print("  Error: "); Serial.print(motor_error, 1);
+      //Serial.print("  PWM: ");  Serial.print(motor_output);
+      //Serial.println("%");
+      prev_RPM = RPM;
+      motor_prev_time = motor_time;
     }
+    motor_time = micros();
+  }
 
-    heat_error = heat_set_point - temperature;
-    //Serial.println("Temperature"); Serial.print(temperature);
-    calculateTemperatureMean(temperature);
-    //Serial.println("Heating:"); Serial.print(heat_output);
-    heat_time_prev = heat_time;
+  /*================================HEATING CALCULATION==============================*/
+  if (heating_killed) {
+    heat_output = -1;
+  }
+  else {
+    /* calcuates temperature and the response to setpoint*/
+    heat_time = millis();
+    if (heat_time - heat_time_prev >= heat_interval) {
+      Vout = (analogRead(heatInputPin) * heat_transfer); /* Measures the potential after the pd drop across the resistor in series with thermistor/
+      /* max voltage is 3.3V, thre pin returns 4096 possible inputs*/
+
+      RT = (R2 * (Vout / Vin_max)) / (1.0 - Vout / Vin_max);                               /* Calculates the resitance of the thermistor using potential divider*/
+      temperature = (b * (T0 + 273.0)) / ((T0 + 273.0) * log((RT / RT_base)) + b) - 273.0; /* uses thermistor's resistance to calculate tenperature*/
+                                                                                          /*Bang Bang control*/
+      if (temperature <= (heat_set_point - heat_deadband)) {                               /* heat deaband is zero, but keeping it here just in case we miraculously have time to fiddle with heating again*/
+        heat_output = 60;
+      } else {
+        heat_output = -1; /* making the duty cycle negative somehow makes the code a lot simpler*/
+      }
+
+      heat_error = heat_set_point - temperature;
+      //Serial.println("Temperature"); Serial.print(temperature);
+      calculateTemperatureMean(temperature);
+      //Serial.println("Heating:"); Serial.print(heat_output);
+      heat_time_prev = heat_time;
+    }
   }
 
 
@@ -324,54 +335,60 @@ void loop() {
   // pH_time = millis();
 
   //if (pH_time-pH_time_prev>=pH_interval){
-
-  Bs = analogRead(pHPin);
-  /*ph calculation ------- may need to change the variables in testing*/
-  pH = ((0.00932 * Bs) - 19.2);                  //gets pH by doing process mentioned line 3 might want to adjust I'm not too sure about the logic here
-                                                 // Serial.println("pH"); Serial.print(pH);
-  pHSmoothed = (0.9 * pHSmoothed) + (0.1 * pH);  //IIR smoothing works by reducing the weight of the latest reading- finding like an average of all readings->to help with noise from probe-> less random changes
-
-
-  /*I've commented out this code here that prints out pH smoothed after an invterval because I've already added an interval for the whole pH, but keeping it here just in case*/
-
-
-  /*Timems=millis();         //number of milliseconds since ESP32 MCU started
-
-
-
-  if (Timems-T2>0){
-    T2=T2+1000;      //prints pH value once a second as only when 1000 milliseconds( 1 second ) has passed will Timems-T2 be greater than 0
-  Serial.println(pHSmoothed);  //prints next line for clarity
-  }  */
-  //Following is bang bang might want to check logic of it later
-  //If the pH too high
-  if (pHSmoothed > AimpH + DeltapH) {
+  if (pumps_killed) {
     BaseOffAction();
-    AcidOnAction();
-    //LastTimeAcidOn=pH_time; //These variables for last time on can be useful later I think if we add safety precautions
-  }
-
-  // //If the pH too low
-  else if (pHSmoothed < AimpH - DeltapH) {
     AcidOffAction();
-    BaseOnAction();  //turn base pump on
-                     //       LastTimeBaseOn=pH_time; //These variables for last time on can be useful later I think if we add safety precautions
   }
-  // //If pH is in hysteresis band as you can tell it is now late and I can't be asked to annotate code in depth
   else {
-    AcidOffAction();
-    BaseOffAction();
+    Bs = analogRead(pHPin);
+    /*ph calculation ------- may need to change the variables in testing*/
+    pH = ((0.00932 * Bs) - 19.2);                  //gets pH by doing process mentioned line 3 might want to adjust I'm not too sure about the logic here
+                                                  // Serial.println("pH"); Serial.print(pH);
+    pHSmoothed = (0.9 * pHSmoothed) + (0.1 * pH);  //IIR smoothing works by reducing the weight of the latest reading- finding like an average of all readings->to help with noise from probe-> less random changes
+
+
+    /*I've commented out this code here that prints out pH smoothed after an invterval because I've already added an interval for the whole pH, but keeping it here just in case*/
+
+
+    /*Timems=millis();         //number of milliseconds since ESP32 MCU started
+
+
+
+    if (Timems-T2>0){
+      T2=T2+1000;      //prints pH value once a second as only when 1000 milliseconds( 1 second ) has passed will Timems-T2 be greater than 0
+    Serial.println(pHSmoothed);  //prints next line for clarity
+    }  */
+    //Following is bang bang might want to check logic of it later
+    //If the pH too high
+    if (pHSmoothed > AimpH + DeltapH) {
+      BaseOffAction();
+      AcidOnAction();
+      //LastTimeAcidOn=pH_time; //These variables for last time on can be useful later I think if we add safety precautions
+    }
+
+    // //If the pH too low
+    else if (pHSmoothed < AimpH - DeltapH) {
+      AcidOffAction();
+      BaseOnAction();  //turn base pump on
+                      //       LastTimeBaseOn=pH_time; //These variables for last time on can be useful later I think if we add safety precautions
+    }
+    // //If pH is in hysteresis band as you can tell it is now late and I can't be asked to annotate code in depth
+    else {
+      AcidOffAction();
+      BaseOffAction();
+    }
+    //   pH_time_prev = pH_time;
+
+    //   /*Replacement code for the code I commented out*/
+
+    //   Serial.println("pH Smooth"); Serial.print(pH);
+
+    //   Serial.println("pH Smoothed"); Serial.print(pHSmoothed);
+
+    //   //Can add code for testing printing stuff later if needed :)))
+    //   /* Potential for kill switches*/
   }
-  //   pH_time_prev = pH_time;
 
-  //   /*Replacement code for the code I commented out*/
-
-  //   Serial.println("pH Smooth"); Serial.print(pH);
-
-  //   Serial.println("pH Smoothed"); Serial.print(pHSmoothed);
-
-  //   //Can add code for testing printing stuff later if needed :)))
-  //   /* Potential for kill switches*/
 
 
   readDevKitCData();

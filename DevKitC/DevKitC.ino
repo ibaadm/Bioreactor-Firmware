@@ -127,7 +127,7 @@ void publishTelemetry(double ph, double temperature, double rpm) {
 
   char msg[128];
   snprintf(msg, sizeof(msg), 
-            "{\"ph\": %.2f, \"temperature\": %.1f, \"rpm\": %d}", 
+            "{\"ph\": %.2f, \"temperature\": %.1f, \"rpm\": %.0f}", 
             ph, temperature, rpm);
 
   if (mqttClient.publish(MQTT_TOPIC_TELEMETRY, msg)) {
